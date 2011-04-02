@@ -1,0 +1,19 @@
+#!/usr/bin/perl
+
+open(GR, "/var/lib/news/newsgroups") || die;
+while (<GR>) {
+    chop;
+    ($group, $desc) = split(/\t/);
+    $groups{$group} = 1;
+}
+close GROUPS;
+
+open(DELETE, "/home/tmp/gwene-deletions") || die;
+while (<DELETE>) {
+    chop;
+    ($group) = split(/\t/);
+    if ($groups{$group}) {
+	print "Deleting $group\n";
+	system("/gmane/rmgroup", $group);
+    }
+}

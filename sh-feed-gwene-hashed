@@ -1,0 +1,3 @@
+#!/bin/bash
+
+/home/larsi/gwene/feed-gwene-hashed `date +%M` "" >> /tmp/feed.log

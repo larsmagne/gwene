@@ -1,0 +1,22 @@
+#!/usr/bin/perl
+
+require "/usr/local/src/XML-TreePP-0.41/blib/lib/XML/TreePP.pm";
+require "/usr/local/src/XML-FeedPP-0.42/blib/lib/XML/FeedPP.pm";
+#use XML::FeedPP;
+
+my $source = $ENV{'URL'};
+
+$tmp = "/tmp/feed.$$.rss";
+system("curl", "-s", "-o", $tmp, "-m", "10", "-L",
+       "-A", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.1.10) Gecko/20100623 Iceweasel/3.5.10 (like Firefox/3.5.10)",
+       $source);
+
+my $feed = XML::FeedPP->new($tmp);
+
+if (-f $tmp) {
+    unlink $tmp;
+}
+
+if ($feed) {
+    print "Ok " . $feed->link() . "\n";
+}

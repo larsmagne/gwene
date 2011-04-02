@@ -1,0 +1,31 @@
+#!/usr/bin/perl
+
+use Digest::SHA1  qw(sha1 sha1_hex sha1_base64);
+
+$instance = $ARGV[0] % 30;
+
+$suffix = $ARGV[1];
+
+open(GROUPS, "/var/lib/news/newsgroups") || die;
+
+while (<GROUPS>) {
+    chop;
+    ($group, $desc) = split(/\t/);
+    $groups{$group} = 1;
+}
+
+open(GWENE, "/home/tmp/gwene$suffix-requests") || die;
+
+while (<GWENE>) {
+    chop;
+    ($group, $url, $urlid, $date, $parent_id) = split(/\t/);
+    $sha = sha1($url);
+    $result = 0;
+    foreach $s ($sha) {
+	$result += ord($s);
+    }
+    if ($groups{$group} && (($result % 30) == $instance)) {
+        print "Feeding $group $url\n";
+        system("/home/larsi/gwene/fetch-rss", $url, $group, $parent_id);
+    }
+}

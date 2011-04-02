@@ -1,0 +1,392 @@
+#!/usr/bin/perl
+
+require "/usr/local/src/XML-TreePP-0.41/blib/lib/XML/TreePP.pm";
+require "/usr/local/src/XML-FeedPP-0.42/blib/lib/XML/FeedPP.pm";
+#use XML::FeedPP;
+use Encode qw/encode decode/;
+use Date::Parse;
+use POSIX qw(strftime);
+use Digest::SHA1  qw(sha1 sha1_hex sha1_base64);
+use Net::NNTP;
+use HTML::Entities;
+use BerkeleyDB;
+use CGI;
+
+if ($ARGV[0] =~ /http/) {
+    $source = $ARGV[0];
+    $newsgroup = $ARGV[1];
+} else {
+    $source = $ARGV[1];
+    $newsgroup = $ARGV[0];
+}
+
+$parent_id = $ARGV[2];
+
+my $postedenv = new BerkeleyDB::Env
+    -Home   => "/var/tmp/gwene" ,
+    -Flags  => DB_CREATE| DB_INIT_CDB | DB_INIT_MPOOL
+    or die "cannot open environment: $BerkeleyDB::Error\n";
+
+tie %posted, "BerkeleyDB::Hash",
+    -Filename       => '/var/tmp/gwene/posted.db',
+    -Flags          => DB_CREATE,
+    -Env            => $postedenv
+    or die "cannot open database: $BerkeleyDB::Error\n";
+
+sub rfc2047_encode {
+    my $string = shift;
+    my $word = "";
+    my $encodingp = 0;
+    my $result = "";
+    @strings = split(/[ \t\n]+/, $string);
+    foreach $sub (@strings) {
+	$encodingp = 0;
+	$word = "";
+	@chars = split(//, $sub);
+	foreach $char (@chars) {
+	    $c = ord($char);
+	    if (($c >= 8 && $c <= 10) ||
+		($c == 12) ||
+		($c >= 33 && $c <= 60) ||
+		($c == 62) ||
+		($c >= 64 && $c <= 127)) {
+		$word .= $char;
+	    } elsif ($c == 32) {
+		$word .= "_";
+	    } else {
+		$encodingp = 1;
+		$word .= sprintf("=%02x", $c);
+	    }
+	}
+	if ($encodingp) {
+	    $word = "=?utf-8?q?" . $word . "?=";
+	}
+	if ($result eq "") {
+	    $result = $word;
+	} else {
+	    $result .= " " . $word;
+	}
+    }
+    $result =~ s/\?= =\?utf-8\?q\?/_/g;
+    return $result;
+}
+
+sub my_sort_item {
+    my $self = shift;
+    my $list = $self->{rss}->{channel}->{item} or return;
+    my $epoch = [ map { $_->get_pubDate_epoch() || 0 } @$list ];
+    my $sorted = [ map { $list->[$_] } sort {
+        $epoch->[$a] <=> $epoch->[$b]
+		   } 0 .. $#$list ];
+    return @sorted;
+}
+
+sub my_description {
+    my $self = shift;
+    my $content = $self->get_value("content:encoded") ||
+	$self->description();
+    return $content;
+}
+
+
+$tmp = "/tmp/feed.$$.rss";
+system("curl", "-s", "-o", $tmp, "-m", "5", "-L",
+       "-A", "Gwene/1.0 (The gwene.org rss-to-news gateway)",
+       $source);
+if ($? != 0) {
+    if (-f $tmp) {
+	unlink $tmp;
+    }
+    exit;
+}
+#if ($newsgroup =~ /bookofjoe/) {
+if (1) {
+    system("/home/httpd/bin/encode-content", $tmp, "$tmp.code");
+    rename "$tmp.code", $tmp;
+}
+eval {
+    $feed = XML::FeedPP->new($tmp, utf8_flag => 0);
+};
+if (-f $tmp) {
+    unlink $tmp;
+}
+
+if ($feed) {
+    print "Ok\n";
+} else {
+    print "Error in feed\n";
+    exit;
+}
+
+eval {
+    $feed->sort_item();
+};
+
+foreach my $item ($feed->get_item()) {
+    $items[$a++] = $item;
+}
+
+#my $ENCODING = 'utf8';
+
+foreach my $item (@items) {
+    $link = $item->link();
+    if (! $links{$link}) {
+	$difflinks++;
+    }
+    $numlinks++;
+    $links{$link}++;
+}
+
+if ($numlinks > 3 && $difflinks == 1) {
+    $date_id = 1;
+}
+
+foreach my $item (reverse @items) {
+    $count = 1;
+    $old_newsgroups = "";
+    $subject = $item->title();
+    if ($parent_id) {
+	$subject = $feed->title();
+	$subject =~ s/^comments on[^:]*: *//i;
+    }
+    if ($subject =~ /&.*;/) {
+	$new = decode_entities(decode("utf8", $subject));
+	if ($new ne $subject) {
+	    $subject = encode("utf8", $new);
+	}
+    }
+    $subject =~ s/\n/ /g;
+    $subject =~ s/^ +//;
+    $subject =~ s/ +$//;
+    if ($subject eq "") {
+	$subject = "(untitled)";
+    }    
+    $subject =~ s/<[^>]+>//g;
+
+    $from = $item->author();
+    if ($from =~ /&.*;/) {
+	$new = decode_entities(decode("utf8", $from));
+	if ($new ne $from) {
+	    $from = encode("utf8", $new);
+	}
+    }
+    $from =~ s/\n/ /g;
+    $from =~ s/<[^>]+>//g;
+    if ($from eq "") {
+	$from = "unknown";
+    }
+    $address = $item->get_value("email");
+    $date = $item->pubDate();
+    $guid = $item->guid();
+    $link = $item->link();
+
+    $id = $guid;
+    $skip = 0;
+    $a = 0;
+    undef $art;
+    if ($id eq "") {
+	$id = $link;
+    }
+    if ($date_id && ! $guid) {
+	$id .= "-$date";
+    }
+
+    $enclosure = "";
+    eval {
+	%enclosure = %{$item->{"enclosure"}};
+	$enclosure = $enclosure{"-url"};
+    };
+
+    #print $item->title() . "\n";
+    #print encode("utf8", $subject) . "\n";
+    #print rfc2047_encode(encode("utf8", $subject)) . "\n";
+    #print rfc2047_encode($subject) . "\n";
+
+    $content_hash = sha1_base64(encode("utf8", my_description($item)));
+
+    $message_id = "<x1-" . 
+	sha1_base64($newsgroup . encode("utf8", $id) . "geheimNis") .
+	"\@gwene.org>";
+
+    if ($posted{$message_id} eq $content_hash) {
+	#print "Local DB already seen this content; ignoring\n";
+	$skip = 1;
+    } else {
+	if (! $nntp) {
+	    @nntp = ("news.gmane.org");
+	    $nntp = Net::NNTP->new(@nntp) || die "cannot connect to NNTP server";
+	}
+	for ($i = 1; $i < 10; $i++) {
+	    $message_id = "<x" . $i . "-" . 
+		sha1_base64($newsgroup . encode("utf8", $id) . "geheimNis") .
+		"\@gwene.org>";
+	    if ($headers = $nntp->head($message_id)) {
+		#print "Found $message_id\n";
+		$skip = 1;
+		foreach (@{$headers}) {
+		    if (/^X-Content-Hash: (.*)/) {
+			if ($1 eq $content_hash) {
+			    #print "inn already seen this content; skipping\n";
+			    $posted{$message_id} = $content_hash;
+			    $skip = 1;
+			    break;
+			}
+		    }
+		    if (/^Newsgroups: (.*)/) {
+			$old_newsgroups = $1;
+		    }
+		}
+		$count = $i + 1;
+		$message_id = "Message-ID: <x" . $count . "-" . sha1_base64($newsgroup . encode("utf8", $id) . "geheimNis") .
+		    "\@gwene.org>\n";
+		#$posted{$message_id} = $content_hash;
+		break;
+	    }
+	}
+    }
+
+    undef $comment_feed;
+    undef $comment_group;
+    if ($item->get_value("wfw:commentRss")) {
+	$comment_feed = $item->get_value("wfw:commentRss");
+    } else {
+	eval {
+	    my @links= map {$_} (@{$item->{'link'}});
+	    foreach $l (@links) {
+		%alink = %$l;
+		if ($alink{'-rel'} eq "replies" &&
+		    $alink{'-type'} =~ /atom|xml|rss/) {
+		    $comment_feed = $alink{'-href'};
+		}
+	    }
+	};
+    }
+    if ($comment_feed && $parent_id eq "" && 
+	$newsgroup =~ /languagelog|photoshop.dis|yegge|com.tcj|badscience|comics.comics.mag/) {
+	$comment_group = $newsgroup;
+	$comment_group =~ s/^gwene./gwene.full./;
+	open(FEEDS, "/home/tmp/gwene-comment-requests") || die;
+	$found = 0;
+	while (<FEEDS>) {
+	    chop;
+	    ($cgroup, $cfeed, $cid) = split(/\t/);
+	    if ($cfeed eq $comment_feed) {
+		$found = 1;
+	    }
+	}
+	close FEEDS;
+	$comment_feed =~ s/&/%26/g;
+	if (! $found) {
+	    $mid = "x" . $count . "-" .
+		sha1_base64($newsgroup . encode("utf8", $id) . "geheimNis") .
+		"\@gwene.org";
+	    $mid = CGI::escape($mid);
+	    print "http://gwene.org/index.php?group=$comment_group&url=$comment_feed&confirm=t&ignore_feed_id=t&parent=$mid\n";
+	    system("curl",  "-s",  
+		   "http://gwene.org/index.php?group=$comment_group&url=$comment_feed&confirm=t&ignore_feed_id=t&parent=$mid");
+	}
+    }
+
+    if (! $skip) {
+	$try_again = 2;
+	$efrom = rfc2047_encode($from);
+	if ($efrom =~ /.+\@.+\..+/) {
+	    $hfrom = "From: $efrom\n";
+	} elsif ($address =~ /.+\@.+\..+/) {
+	    $hfrom = "From: $efrom <$address>\n";
+	} else {
+	    $hfrom = "From: $efrom <post\@gwene.org>\n";
+	}
+	while ($try_again) {
+	    undef @art;
+	    undef $art;
+	    $a = 0;
+	    $nntp->quit;
+	    $nntp = Net::NNTP->new(@nntp) || die "cannot connect to NNTP server";
+	    
+	    if ($old_newsgroups) {
+		@groups = split(/,/, $old_newsgroups);
+		$includeg = 1;
+		foreach $g (@groups) {
+		    if ($g eq $newsgroup) {
+			$includeg = 0;
+		    } 
+		}
+		if ($includeg) {
+		    $n = "$newsgroup,$old_newsgroups";
+		} else {
+		    $n = $old_newsgroups;
+		}
+	    } else {
+		$n = $newsgroup;
+	    }
+	    if ($comment_group) {
+		$n .= ",$comment_group";
+	    }
+	    $art[$a++] = "Newsgroups: $n\n";
+	    $art[$a++] = $hfrom;
+	    if ($parent_id) {
+		$subject = "Re: $subject";
+	    }
+	    $art[$a++] =  "Subject: " . rfc2047_encode($subject) . "\n";
+	    eval {
+		$time = str2time($date);
+	    };
+	    if ($time < 10000) {
+		$time = time();
+	    }
+	    $art[$a++] =  "Date: " . strftime("%a, %d %b %Y %H:%M:%S %z",
+					      localtime($time)) .
+						  "\n";
+	    $art[$a++] =  "Content-type: text/html; charset=utf-8\n";
+	    $art[$a++] =  "Content-Transfer-Encoding: 8bit\n";
+	    $message_id = "<x" . $count . "-" .
+		sha1_base64($newsgroup . encode("utf8", $id) . "geheimNis") .
+		"\@gwene.org>";
+	    $art[$a++] =  "Message-ID: $message_id\n";
+	    if ($parent_id) {
+		$art[$a++] = "References: <$parent_id>\n";
+	    }
+	    
+	    if ($count > 1) {
+		$prev = $count - 1;
+		$art[$a++] = "Supersedes: <x" . $prev . "-" .
+		    sha1_base64($newsgroup . encode("utf8", $id) . "geheimNis") . 
+		    "\@gwene.org>\n";
+	    }
+	    $art[$a++] =  "X-Content-Hash: $content_hash\n";
+	    $art[$a++] = "Approved: news\@gmane.org\n";
+	    $art[$a++] = "X-Feed: $source\n";
+	    if ($link) {
+		$art[$a++] =  "Archived-at: <$link>\n";
+	    }
+	    
+	    
+	    $art[$a++] =  "\n";
+	    $art[$a++] =  my_description($item);
+	    $art[$a++] =  "\n";
+	    
+	    if ($enclosure) {
+		$art[$a++] = "<p><a href=\"$enclosure\">Data</a>";
+	    }
+
+	    $art[$a++] =  "<p><a href=\"$link\">Link</a>";
+	    $art[$a++] =  "\n";
+	    
+	    #print @art;
+	    $result = $nntp->post(\@art);
+	    $msg = (reverse $nntp->message())[0];
+	    if ($msg =~ /From: address not in Internet syntax/) {
+		$hfrom = "From: unknown <post\@gwene.com\n";
+		$try_again--;
+	    } else {
+		$try_again = 0;
+	    }
+	    if ($msg =~ /Article received|Duplicate/) {
+		$posted{$message_id} = $content_hash;
+	    }
+	    print $msg;
+	}
+
+    }
+}

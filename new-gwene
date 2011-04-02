@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+
+# Go through the queue of new feeds and see if any of them are new.
+# If so, start feeding the group.
+
+while (1) {
+    undef %created;
+    if (-f "/home/tmp/gwene-created") {
+	open(CREATED, "/home/tmp/gwene-created");
+	while (<CREATED>) {
+	    chop;
+	    $created{$_} = 1;
+	}
+	close CREATED;
+	unlink "/home/tmp/gwene-created";
+
+	sleep(2);
+
+	open(GROUPS, "/var/lib/news/newsgroups") || die;
+	while (<GROUPS>) {
+	    chop;
+	    ($group, $desc) = split(/\t/);
+	    $groups{$group} = 1;
+	}
+	close GROUPS;
+
+	open(GWENE, "/home/tmp/gwene-requests") || die;
+	while (<GWENE>) {
+	    chop;
+	    ($group, $url, $urlid, $date, $parent_id) = split(/\t/);
+	    if ($groups{$group} && $created{$group}) {
+		print "Feeding $group $url\n";
+		system("/home/larsi/gwene/fetch-rss", $url, $group, 
+		       $parent_id);
+	    }
+	}
+    }
+    sleep(1);
+}
+

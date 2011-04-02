@@ -1,0 +1,54 @@
+#!/usr/bin/perl
+
+# Some feeds have "raw" HTML in the content/description part.  This
+# script quotes the HTML so that the feed can be parsed as XML.
+
+$file = $ARGV[0];
+$out = $ARGV[1];
+
+open(FILE, $file) || die;
+open(OUT, ">$out") || die;
+undef $/;
+$content = <FILE>;
+close FILE;
+
+$content =~ s/<content type="xhtml">/<content type="html">/g;
+
+
+$orig_content = $content;
+
+@elems = ("content", "description");
+
+foreach $tag (@elems) {
+    $new = "";
+    $content =~ s/<$tag \/>//g;
+
+    $regexp = "(^.*?)(<$tag [^>]*>|<$tag>)(.*?)(<\/$tag)";
+    
+    while ($content =~ /$regexp/s &&
+	$content !~ /CDATA/) {
+	$all = $&;
+	$ending = $4;
+	$new .= $1;
+	$new .= $2;
+	$bit = $3;
+	if ($bit =~ /</ && $bit =~ />/) {
+	    $bit =~ s/&/&amp;/g;
+	    $bit =~ s/</&lt;/g;
+	    $bit =~ s/>/&gt;/g;
+	}
+	$new .= $bit;
+	$new .= $ending;
+	$content = substr($content, length($all));
+	$did = 1;
+    }
+    
+    $new .= $content;
+    $content = $new;
+}
+
+if ($did) {
+    print OUT $new;
+} else {
+    print OUT $orig_content;
+}
