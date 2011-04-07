@@ -99,11 +99,10 @@ if ($? != 0) {
     }
     exit;
 }
-#if ($newsgroup =~ /bookofjoe/) {
-if (1) {
-    system("/home/httpd/bin/encode-content", $tmp, "$tmp.code");
-    rename "$tmp.code", $tmp;
-}
+
+system("/home/larsi/gwene/encode-content", $tmp, "$tmp.code");
+rename "$tmp.code", $tmp;
+
 eval {
     $feed = XML::FeedPP->new($tmp, utf8_flag => 0);
 };
