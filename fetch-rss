@@ -81,6 +81,25 @@ sub my_sort_item {
     return @sorted;
 }
 
+sub expand_urls {
+    my $contents = shift;
+    my $url = shift;
+    my $whole;
+    my $bit;
+    my $prefix;
+    $url =~ s/^([^:]+:\/\/[^\/]+).*/\1/;
+    while ($contents =~ /((src|href)=['\"])([^'\"]+)/ &&
+	   ($prefix = $1) &&
+	   ($whole = $&) &&
+	   ($bit = $3) &&
+	   $bit !~ /^[a-zA-Z]+:/) {
+	my $new = $url . $bit;
+        $whole = qr/$whole/;
+	$contents =~ s/$whole/$prefix$new/g;
+    }
+    return $contents;
+}
+
 sub my_description {
     my $self = shift;
     my $content = $self->get_value("content:encoded") ||
@@ -191,17 +210,14 @@ foreach my $item (reverse @items) {
     }
 
     $enclosure = "";
+    # This may fail, which is OK.
     eval {
 	%enclosure = %{$item->{"enclosure"}};
 	$enclosure = $enclosure{"-url"};
     };
 
-    #print $item->title() . "\n";
-    #print encode("utf8", $subject) . "\n";
-    #print rfc2047_encode(encode("utf8", $subject)) . "\n";
-    #print rfc2047_encode($subject) . "\n";
-
-    $content_hash = sha1_base64(encode("utf8", my_description($item)));
+    $contents = expand_urls(my_description($item), $source);
+    $content_hash = sha1_base64(encode("utf8", $contents));
 
     $message_id = "<x1-" . 
 	sha1_base64($newsgroup . encode("utf8", $id) . "geheimNis") .
@@ -261,7 +277,7 @@ foreach my $item (reverse @items) {
 	};
     }
     if ($comment_feed && $parent_id eq "" && 
-	$newsgroup =~ /languagelog|photoshop.dis|yegge|com.tcj|badscience|comics.comics.mag/) {
+	$newsgroup =~ /languagelog|photoshop.dis|yegge|com.tcj|badscience|comics.comics.mag|github.larsmagne/) {
 	$comment_group = $newsgroup;
 	$comment_group =~ s/^gwene./gwene.full./;
 	open(FEEDS, "/home/tmp/gwene-comment-requests") || die;
@@ -361,9 +377,9 @@ foreach my $item (reverse @items) {
 	    }
 	    
 	    
-	    $art[$a++] =  "\n";
-	    $art[$a++] =  my_description($item);
-	    $art[$a++] =  "\n";
+	    $art[$a++] = "\n";
+	    $art[$a++] = $contents;
+	    $art[$a++] = "\n";
 	    
 	    if ($enclosure) {
 		$art[$a++] = "<p><a href=\"$enclosure\">Data</a>";
