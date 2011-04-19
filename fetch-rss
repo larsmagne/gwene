@@ -84,20 +84,16 @@ sub my_sort_item {
 sub expand_urls {
     my $contents = shift;
     my $url = shift;
-    my $whole;
-    my $bit;
-    my $prefix;
+    my $new_contents = "";
+    # Remove the bits after the domain name.
     $url =~ s/^([^:]+:\/\/[^\/]+).*/\1/;
-    while ($contents =~ /((src|href)=['\"])([^'\"]+)/ &&
-	   ($prefix = $1) &&
-	   ($whole = $&) &&
-	   ($bit = $3) &&
-	   $bit !~ /^[a-zA-Z]+:/) {
-	my $new = $url . $bit;
-        $whole = qr/$whole/;
-	$contents =~ s/$whole/$prefix$new/g;
+    foreach (split(/(href=['\"])|(src=['\"])/, $contents)) {
+	if (/^\//) {
+	    $new_contents .= $url;
+	}
+	$new_contents .= $_;
     }
-    return $contents;
+    return $new_contents;
 }
 
 sub my_description {
