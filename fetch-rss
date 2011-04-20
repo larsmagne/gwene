@@ -84,16 +84,19 @@ sub my_sort_item {
 sub expand_urls {
     my $contents = shift;
     my $url = shift;
-    my $new_contents = "";
+    my $relative = 0;
     # Remove the bits after the domain name.
     $url =~ s/^([^:]+:\/\/[^\/]+).*/\1/;
     foreach (split(/(href=['\"])|(src=['\"])/, $contents)) {
 	if (/^\//) {
-	    $new_contents .= $url;
+	    $relative = 1;
 	}
-	$new_contents .= $_;
     }
-    return $new_contents;
+    if ($relative) {
+	return "<head><base href=\"$url\"></head>$contents";
+    } else {
+	return $contents;
+    }
 }
 
 sub my_description {
