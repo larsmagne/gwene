@@ -81,22 +81,15 @@ sub my_sort_item {
     return @sorted;
 }
 
-sub expand_urls {
+sub relative_urls_p {
     my $contents = shift;
-    my $url = shift;
     my $relative = 0;
-    # Remove the bits after the domain name.
-    $url =~ s/^([^:]+:\/\/[^\/]+).*/\1/;
     foreach (split(/(href=['\"])|(src=['\"])/, $contents)) {
 	if (/^\//) {
 	    $relative = 1;
 	}
     }
-    if ($relative) {
-	return "<head><base href=\"$url\"></head>$contents";
-    } else {
-	return $contents;
-    }
+    return $relative;
 }
 
 sub my_description {
@@ -215,7 +208,14 @@ foreach my $item (reverse @items) {
 	$enclosure = $enclosure{"-url"};
     };
 
-    $contents = expand_urls(my_description($item), $source);
+    $contents = my_description($item);
+    if (relative_urls_p($contents) ||
+	relative_urls_p($link)) {
+	my $url = $source;
+	# Remove the bits after the domain name.
+	$url =~ s/^([^:]+:\/\/[^\/]+).*/\1/;
+	$contents = "<head><base href=\"$url\"></head>$contents";
+    }
     $content_hash = sha1_base64(encode("utf8", $contents));
 
     $message_id = "<x1-" . 
@@ -276,7 +276,7 @@ foreach my $item (reverse @items) {
 	};
     }
     if ($comment_feed && $parent_id eq "" && 
-	$newsgroup =~ /languagelog|photoshop.dis|yegge|com.tcj|badscience|comics.comics.mag|github.larsmagne/) {
+	$newsgroup =~ /languagelog|photoshop.dis|yegge|com.tcj|badscience|comics.comics.mag|github.larsmagne|hooded.ut/) {
 	$comment_group = $newsgroup;
 	$comment_group =~ s/^gwene./gwene.full./;
 	open(FEEDS, "/home/tmp/gwene-comment-requests") || die;
