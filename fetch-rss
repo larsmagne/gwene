@@ -103,7 +103,7 @@ sub my_description {
 $tmp = "/tmp/feed.$$.rss";
 system("curl", "-s", "-o", $tmp, "-m", "5", "-L",
        "-A", "Gwene/1.0 (The gwene.org rss-to-news gateway)",
-       $source);
+       "--compressed", $source);
 if ($? != 0) {
     if (-f $tmp) {
 	unlink $tmp;
