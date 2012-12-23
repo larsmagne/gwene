@@ -11,6 +11,7 @@ use Net::NNTP;
 use HTML::Entities;
 use BerkeleyDB;
 use CGI;
+use Scalar::Util qw/reftype/;
 
 if ($ARGV[0] =~ /http/) {
     $source = $ARGV[0];
@@ -96,6 +97,14 @@ sub my_description {
     my $self = shift;
     my $content = $self->get_value("content:encoded") ||
 	$self->description();
+
+    # This is a bug.  On XHTML, FeedPP will return a tree instead of
+    # the text.  In that case, transform the data into text explicity.
+    if (reftype $content eq "HASH") {
+	my $tpp = XML::TreePP->new();
+	bless($content);
+	$content = $tpp->write($content, "utf-8");
+    }
     return $content;
 }
 
@@ -108,6 +117,7 @@ if ($? != 0) {
     if (-f $tmp) {
 	unlink $tmp;
     }
+    print "Unable to fetch feed\n";
     exit;
 }
 
