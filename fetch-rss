@@ -1,8 +1,9 @@
 #!/usr/bin/perl
 
-require "/usr/local/src/XML-TreePP-0.41/blib/lib/XML/TreePP.pm";
-require "/usr/local/src/XML-FeedPP-0.43/blib/lib/XML/FeedPP.pm";
-#use XML::FeedPP;
+use lib "/usr/local/src/XML-TreePP-0.41/blib/lib";
+use lib "/usr/local/src/XML-FeedPP-0.43/blib/lib/";
+use XML::FeedPP;
+use XML::TreePP;
 use Encode qw/encode decode/;
 use Date::Parse;
 use POSIX qw(strftime);
@@ -12,6 +13,7 @@ use HTML::Entities;
 use BerkeleyDB;
 use CGI;
 use Scalar::Util qw/reftype/;
+use FindBin;
 
 if ($ARGV[0] =~ /http/) {
     $source = $ARGV[0];
@@ -23,16 +25,19 @@ if ($ARGV[0] =~ /http/) {
 
 $parent_id = $ARGV[2];
 
+my $home = "/var/tmp/gwene";
+mkdir $home unless -e $home;
+
 my $postedenv = new BerkeleyDB::Env
-    -Home   => "/var/tmp/gwene" ,
+    -Home   => $home,
     -Flags  => DB_CREATE| DB_INIT_CDB | DB_INIT_MPOOL
     or die "cannot open environment: $BerkeleyDB::Error\n";
 
 tie %posted, "BerkeleyDB::Hash",
-    -Filename       => '/var/tmp/gwene/posted.db',
+    -Filename       => "$home/posted.db",
     -Flags          => DB_CREATE,
     -Env            => $postedenv
-    or die "cannot open database: $BerkeleyDB::Error\n";
+    or die "cannot open database $home/posted.db: $BerkeleyDB::Error\n";
 
 sub rfc2047_encode {
     my $string = shift;
@@ -121,7 +126,7 @@ if ($? != 0) {
     exit;
 }
 
-system("/home/larsi/gwene/encode-content", $tmp, "$tmp.code");
+system("$FindBin::Bin/encode-content", $tmp, "$tmp.code");
 rename "$tmp.code", $tmp;
 
 eval {
