@@ -1,0 +1,4 @@
+#!/bin/bash
+
+/home/larsi/gwene/feed-gwene-hashed `date +%M` "-comment"\
+    `date --date="-7days" +%Y%m%d` >> /tmp/feed.log
