@@ -3,8 +3,8 @@
 use Digest::SHA1  qw(sha1 sha1_hex sha1_base64);
 
 $instance = $ARGV[0] % 30;
-
 $suffix = $ARGV[1];
+$cutoff = $ARGV[2];
 
 open(GROUPS, "/var/lib/news/newsgroups") || die;
 
@@ -24,7 +24,9 @@ while (<GWENE>) {
     foreach $s ($sha) {
 	$result += ord($s);
     }
-    if ($groups{$group} && (($result % 30) == $instance)) {
+    if ($groups{$group} &&
+	($instance == -1 || (($result % 30) == $instance)) &&
+	(! $cutoff || $date > $cutoff)) {
         print "Feeding $group $url\n";
         system("/home/larsi/gwene/fetch-rss", $url, $group, $parent_id);
     }
