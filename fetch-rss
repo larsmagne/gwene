@@ -111,7 +111,6 @@ sub my_description {
 
 $tmp = "/tmp/feed.$$.rss";
 system("curl", "-s", "-o", $tmp, "-m", "15", "-L",
-       "-3",
        "-A", "Gwene/1.0 (The gwene.org rss-to-news gateway)",
        "--compressed", $source);
 if ($? != 0) {
