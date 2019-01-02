@@ -8,7 +8,7 @@ my $source = $ENV{'URL'};
 
 $tmp = "/tmp/feed.$$.rss";
 system("curl", "-s", "-o", $tmp, "-m", "10", "-L",
-       "-A", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.1.10) Gecko/20100623 Iceweasel/3.5.10 (like Firefox/3.5.10)",
+       "-A", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.1.10) Gecko/20100623 Iceweasel/3.5.10 (like Firefox/3.5.10 like Googlebot)",
        $source);
 
 my $feed = XML::FeedPP->new($tmp);
