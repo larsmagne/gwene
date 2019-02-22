@@ -109,27 +109,48 @@ sub my_description {
 }
 
 
-$tmp = "/tmp/feed.$$.rss";
-system("curl", "-s", "-o", $tmp, "-m", "15", "-L",
-       "-A", "Gwene/1.0 (The gwene.org rss-to-news gateway like Googlebot)",
-       "--compressed", $source);
-if ($? != 0) {
-    if (-f $tmp) {
-	unlink $tmp;
-    }
-    print "Unable to fetch feed\n";
-    exit;
+# encode <,>,&
+sub encode_braces {
+    my $input = shift;
+
+	if ($input =~ /[<>]/) {
+	    $input =~ s/&/&amp;/g;
+	    $input =~ s/</&lt;/g;
+	    $input =~ s/>/&gt;/g;
+	}
+
+    return $input;
 }
 
-system("/home/larsi/gwene/encode-content", $tmp, "$tmp.code");
-rename "$tmp.code", $tmp;
+# rss_in | filter | XML::FeedPP::new
+open(my $rss_in, "-|" , "curl", "-s", "-m", "15", "-L",
+     "-A", "Gwene/1.0 (The gwene.org rss-to-news gateway like Googlebot)",
+     "--compressed", $source);
 
-eval {
-    $feed = XML::FeedPP->new($tmp, utf8_flag => 0);
-};
-if (-f $tmp) {
-    unlink $tmp;
+pipe(my $filter_in, my $filter_out);
+
+
+# Some feeds have "raw" HTML in the content/description part.  This
+# script quotes the HTML so that the feed can be parsed as XML.
+while (<$rss_in>) {
+    # change content-type from xhtml to html
+    s/(?<=content type=")xhtml(?=")/html/g;
+
+    # drop empty <content/> and <description/>
+    s/<(content|description) ?\/>//g;
+
+    # encode <,>,& inside <content> and <description>
+    s/(<(?>(content|description)) *[^>]*?>)(((?!CDATA).)*)(?=<\/\2)/$1 . encode_braces($3)/gme;
+
+    print $filter_out $_;
 }
+
+close $rss_in;
+close $filter_out;
+
+$feed = XML::FeedPP->new($filter_in, utf8_flag => 0);
+
+close $filter_in;
 
 if ($feed) {
     print "Ok\n";
