@@ -1,12 +1,13 @@
 #!/usr/bin/perl
 
-require "/usr/local/src/XML-TreePP-0.41/blib/lib/XML/TreePP.pm";
-require "/usr/local/src/XML-FeedPP-0.43/blib/lib/XML/FeedPP.pm";
-#use XML::FeedPP;
+#require "/usr/local/src/XML-TreePP-0.41/blib/lib/XML/TreePP.pm";
+#require "/usr/local/src/XML-FeedPP-0.43/blib/lib/XML/FeedPP.pm";
+use XML::TreePP;
+use XML::FeedPP;
 use Encode qw/encode decode/;
 use Date::Parse;
 use POSIX qw(strftime);
-use Digest::SHA1  qw(sha1 sha1_hex sha1_base64);
+use Digest::SHA  qw(sha1 sha1_hex sha1_base64);
 use Net::NNTP;
 use HTML::Entities;
 use BerkeleyDB;
@@ -24,12 +25,20 @@ if ($ARGV[0] =~ /http/) {
 $parent_id = $ARGV[2];
 
 my $postedenv = new BerkeleyDB::Env
-    -Home   => "/var/tmp/gwene" ,
+    -Home   => "/var/gwene" ,
     -Flags  => DB_CREATE| DB_INIT_CDB | DB_INIT_MPOOL
     or die "cannot open environment: $BerkeleyDB::Error\n";
 
 tie %posted, "BerkeleyDB::Hash",
-    -Filename       => '/var/tmp/gwene/posted.db',
+    -Filename       => '/var/gwene/posted.db',
+    -Flags          => DB_CREATE,
+    -Env            => $postedenv
+    or die "cannot open database: $BerkeleyDB::Error\n";
+
+# The ETag/Last-Modified headers from the last successful fetch of
+# each feed, used for doing conditional requests.
+tie %validators, "BerkeleyDB::Hash",
+    -Filename       => '/var/gwene/validators.db',
     -Flags          => DB_CREATE,
     -Env            => $postedenv
     or die "cannot open database: $BerkeleyDB::Error\n";
@@ -108,54 +117,88 @@ sub my_description {
     return $content;
 }
 
+$tmp = "/tmp/feed.$$.rss";
+$headers_file = "/tmp/feed.$$.headers";
 
-# encode <,>,&
-sub encode_braces {
-    my $input = shift;
+# The same feed may be gatewayed to several groups, so the key has to
+# include the group.
+$validator_key = "$newsgroup $source";
+($old_etag, $old_modified) = split(/\n/, $validators{$validator_key});
+@conditional = ();
+if ($old_etag ne "") {
+    push @conditional, "-H", "If-None-Match: $old_etag";
+}
+if ($old_modified ne "") {
+    push @conditional, "-H", "If-Modified-Since: $old_modified";
+}
 
-	if ($input =~ /[<>]/) {
-	    $input =~ s/&/&amp;/g;
-	    $input =~ s/</&lt;/g;
-	    $input =~ s/>/&gt;/g;
+print "Fetching $source\n";
+system("curl", "-s", "-o", $tmp, "-D", $headers_file, "-m", "15", "-L",
+       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+       "--compressed", @conditional, $source);
+$curl_status = $?;
+
+# Find the status and the validators of the final response.  (With -L
+# there's one block of headers per redirect, so reset on each status
+# line.)
+$http_status = 0;
+$new_etag = "";
+$new_modified = "";
+if (open(HEADERS, $headers_file)) {
+    while (<HEADERS>) {
+	s/[\r\n]+$//;
+	if (/^HTTP\/\S+\s+(\d+)/) {
+	    $http_status = $1;
+	    $new_etag = "";
+	    $new_modified = "";
+	} elsif (/^etag:\s*(.*?)\s*$/i) {
+	    $new_etag = $1;
+	} elsif (/^last-modified:\s*(.*?)\s*$/i) {
+	    $new_modified = $1;
 	}
-
-    return $input;
+    }
+    close HEADERS;
+}
+if (-f $headers_file) {
+    unlink $headers_file;
 }
 
-# rss_in | filter | XML::FeedPP::new
-open(my $rss_in, "-|" , "curl", "-s", "-m", "15", "-L",
-     "-A", "Gwene/1.0 (The gwene.org rss-to-news gateway like Googlebot)",
-     "--compressed", $source);
-
-pipe(my $filter_in, my $filter_out);
-
-
-# Some feeds have "raw" HTML in the content/description part.  This
-# script quotes the HTML so that the feed can be parsed as XML.
-while (<$rss_in>) {
-    # change content-type from xhtml to html
-    s/(?<=content type=")xhtml(?=")/html/g;
-
-    # drop empty <content/> and <description/>
-    s/<(content|description) ?\/>//g;
-
-    # encode <,>,& inside <content> and <description>
-    s/(<(?>(content|description)) *[^>]*?>)(((?!CDATA).)*)(?=<\/\2)/$1 . encode_braces($3)/gme;
-
-    print $filter_out $_;
+if ($curl_status != 0) {
+    if (-f $tmp) {
+	unlink $tmp;
+    }
+    print "Unable to fetch feed $source\n";
+    exit;
 }
 
-close $rss_in;
-close $filter_out;
+if ($http_status == 304) {
+    if (-f $tmp) {
+	unlink $tmp;
+    }
+    print "Not modified $source\n";
+    exit;
+}
 
-$feed = XML::FeedPP->new($filter_in, utf8_flag => 0);
+if ((stat $tmp)[7] > 10000000) {
+    unlink $tmp;
+    print "Feed too big $source\n";
+    exit;
+}
 
-close $filter_in;
+system("/home/larsi/gwene/encode-content", $tmp, "$tmp.code");
+rename "$tmp.code", $tmp;
+
+eval {
+    $feed = XML::FeedPP->new($tmp, utf8_flag => 0);
+};
+if (-f $tmp) {
+    unlink $tmp;
+}
 
 if ($feed) {
-    print "Ok\n";
+    print "Ok $source\n";
 } else {
-    print "Error in feed\n";
+    print "Error in feed $source\n";
     exit;
 }
 
@@ -258,7 +301,7 @@ foreach my $item (reverse @items) {
 	$skip = 1;
     } else {
 	if (! $nntp) {
-	    @nntp = ("news.gmane.org");
+	    @nntp = ("news.gmane.io");
 	    $nntp = Net::NNTP->new(@nntp) || die "cannot connect to NNTP server";
 	}
 	for ($i = 1; $i < 10; $i++) {
@@ -299,15 +342,18 @@ foreach my $item (reverse @items) {
 	    my @links= map {$_} (@{$item->{'link'}});
 	    foreach $l (@links) {
 		%alink = %$l;
-		if ($alink{'-rel'} eq "replies" &&
-		    $alink{'-type'} =~ /atom|xml|rss/) {
+		if (($alink{'-rel'} eq "replies" &&
+		     $alink{'-type'} =~ /atom|xml|rss/) ||
+		    ($alink{'-rel'} eq "alternate" &&
+		     $alink{'-title'} =~ /Comments Feed/ &&
+		     $alink{'-href'} !~ /comments.feed.$/)) {
 		    $comment_feed = $alink{'-href'};
 		}
 	    }
 	};
     }
     if ($comment_feed && $parent_id eq "" && 
-	$newsgroup =~ /languagelog|photoshop.dis|yegge|com.tcj|badscience|comics.comics.mag|github.larsmagne|hooded.ut/) {
+	$newsgroup =~ /languagelog|photoshop.dis|yegge|com.tcj|badscience|comics.comics.mag|github.larsmagne|hooded.ut|comicsbeat/) {
 	$comment_group = $newsgroup;
 	$comment_group =~ s/^gwene./gwene.full./;
 	open(FEEDS, "/home/tmp/gwene-comment-requests") || die;
@@ -403,6 +449,7 @@ foreach my $item (reverse @items) {
 	    $art[$a++] = "Approved: news\@gmane.org\n";
 	    $art[$a++] = "X-Feed: $source\n";
 	    if ($link) {
+                $link =~ s/^[ \t\n]+|[ \t\n]$//g;
 		$art[$a++] =  "Archived-at: <$link>\n";
 	    }
 	    
@@ -412,7 +459,7 @@ foreach my $item (reverse @items) {
 	    $art[$a++] = "\n";
 	    
 	    if ($enclosure) {
-		$art[$a++] = "<p><a href=\"$enclosure\">Data</a>";
+		$art[$a++] = "<p><a href=\"$enclosure\">Enclosure</a>";
 	    }
 
 	    $art[$a++] =  "<p><a href=\"$link\">Link</a>";
@@ -422,7 +469,7 @@ foreach my $item (reverse @items) {
 	    $result = $nntp->post(\@art);
 	    $msg = (reverse $nntp->message())[0];
 	    if ($msg =~ /From: address not in Internet syntax/) {
-		$hfrom = "From: unknown <post\@gwene.com\n";
+		$hfrom = "From: unknown <post\@gwene.org>\n";
 		$try_again--;
 	    } else {
 		$try_again = 0;
@@ -432,6 +479,19 @@ foreach my $item (reverse @items) {
 	    }
 	    print $msg;
 	}
+	if ($posted{$message_id} ne $content_hash) {
+	    $post_failures++;
+	}
 
+    }
+}
+
+# Only remember the validators if everything went well; otherwise we
+# want to refetch the feed the next time and try again.
+if ($http_status == 200 && ! $post_failures) {
+    if ($new_etag ne "" || $new_modified ne "") {
+	$validators{$validator_key} = "$new_etag\n$new_modified";
+    } else {
+	delete $validators{$validator_key};
     }
 }
