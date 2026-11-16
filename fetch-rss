@@ -1,7 +1,5 @@
 #!/usr/bin/perl
 
-#require "/usr/local/src/XML-TreePP-0.41/blib/lib/XML/TreePP.pm";
-#require "/usr/local/src/XML-FeedPP-0.43/blib/lib/XML/FeedPP.pm";
 use XML::TreePP;
 use XML::FeedPP;
 use Encode qw/encode decode/;
@@ -209,8 +207,6 @@ eval {
 foreach my $item ($feed->get_item()) {
     $items[$a++] = $item;
 }
-
-#my $ENCODING = 'utf8';
 
 foreach my $item (@items) {
     $link = $item->link();
