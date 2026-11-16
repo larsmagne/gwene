@@ -390,7 +390,7 @@ foreach my $item (reverse @items) {
 	    $a = 0;
 	    $nntp->quit;
 	    $nntp = Net::NNTP->new(@nntp) || die "cannot connect to NNTP server";
-	    
+
 	    if ($old_newsgroups) {
 		@groups = split(/,/, $old_newsgroups);
 		$includeg = 1;
@@ -424,7 +424,7 @@ foreach my $item (reverse @items) {
 	    }
 	    $art[$a++] =  "Date: " . strftime("%a, %d %b %Y %H:%M:%S %z",
 					      localtime($time)) .
-						  "\n";
+		"\n";
 	    $art[$a++] =  "Content-type: text/html; charset=utf-8\n";
 	    $art[$a++] =  "Content-Transfer-Encoding: 8bit\n";
 	    $message_id = "<x" . $count . "-" .
@@ -434,7 +434,7 @@ foreach my $item (reverse @items) {
 	    if ($parent_id) {
 		$art[$a++] = "References: <$parent_id>\n";
 	    }
-	    
+
 	    if ($count > 1) {
 		$prev = $count - 1;
 		$art[$a++] = "Supersedes: <x" . $prev . "-" .
@@ -448,19 +448,18 @@ foreach my $item (reverse @items) {
                 $link =~ s/^[ \t\n]+|[ \t\n]$//g;
 		$art[$a++] =  "Archived-at: <$link>\n";
 	    }
-	    
-	    
+
 	    $art[$a++] = "\n";
 	    $art[$a++] = $contents;
 	    $art[$a++] = "\n";
-	    
+
 	    if ($enclosure) {
 		$art[$a++] = "<p><a href=\"$enclosure\">Enclosure</a>";
 	    }
 
 	    $art[$a++] =  "<p><a href=\"$link\">Link</a>";
 	    $art[$a++] =  "\n";
-	    
+
 	    #print @art;
 	    $result = $nntp->post(\@art);
 	    $msg = (reverse $nntp->message())[0];
